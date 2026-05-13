@@ -24,6 +24,9 @@ class Color:
     ORANGE = (255, 152, 0)
     BORDER = (180, 180, 180)
     TEXT_GRAY = (100, 100, 100)
+    CARD_GREEN = (76, 175, 80)
+    CARD_GREEN_DARK = (46, 125, 50)
+    CARD_GREEN_LIGHT = (233, 245, 234)
 
 
 class Button:
@@ -79,8 +82,34 @@ class Dropdown:
         self.selected = None
         self.placeholder = placeholder
         self.open = False
-        self.max_visible = 3
+        self.max_visible = 4
         self.item_height = 35
+        self.scroll_offset = 0
+
+    def _draw_arrow(self, surface, open_state):
+        cx = self.rect.right - 18
+        cy = self.rect.centery
+        if open_state:
+            points = [(cx - 6, cy + 3), (cx + 6, cy + 3), (cx, cy - 4)]
+        else:
+            points = [(cx - 6, cy - 3), (cx + 6, cy - 3), (cx, cy + 4)]
+        pygame.draw.polygon(surface, Color.DARK_GRAY, points)
+
+    def get_dropdown_rect(self):
+        dropdown_height = min(len(self.options), self.max_visible) * self.item_height
+        return pygame.Rect(self.rect.x, self.rect.y + self.rect.height + 2, self.rect.width, dropdown_height)
+
+    def handle_wheel(self, mouse_pos, wheel_y):
+        if not self.open or len(self.options) <= self.max_visible:
+            return False
+
+        dropdown_rect = self.get_dropdown_rect()
+        if not (self.rect.collidepoint(mouse_pos) or dropdown_rect.collidepoint(mouse_pos)):
+            return False
+
+        max_offset = len(self.options) - self.max_visible
+        self.scroll_offset = max(0, min(max_offset, self.scroll_offset - wheel_y))
+        return True
 
     def draw(self, surface, font):
         # Main dropdown box
@@ -92,23 +121,20 @@ class Dropdown:
         text_surf = font.render(display_text, True, text_color)
         surface.blit(text_surf, (self.rect.x + 10, self.rect.y + 8))
 
-        # Arrow (larger and more visible)
-        arrow = "▼"
-        arrow_font = pygame.font.Font(None, 22)
-        arrow_surf = arrow_font.render(arrow, True, Color.DARK_GRAY)
-        surface.blit(arrow_surf, (self.rect.x + self.rect.width - 28, self.rect.y + 6))
+        # Arrow drawn as polygon to avoid missing-glyph squares.
+        self._draw_arrow(surface, self.open)
 
         # Dropdown menu when open
         if self.open and self.options:
-            dropdown_height = min(len(self.options), self.max_visible) * self.item_height
-            dropdown_rect = pygame.Rect(self.rect.x, self.rect.y + self.rect.height + 2, self.rect.width, dropdown_height)
+            dropdown_rect = self.get_dropdown_rect()
             
             # Draw dropdown background and border
             pygame.draw.rect(surface, Color.WHITE, dropdown_rect)
             pygame.draw.rect(surface, Color.BORDER, dropdown_rect, 2)
 
             # Draw options
-            for i, option in enumerate(self.options[:self.max_visible]):
+            visible_options = self.options[self.scroll_offset:self.scroll_offset + self.max_visible]
+            for i, option in enumerate(visible_options):
                 y_pos = dropdown_rect.y + i * self.item_height
                 item_rect = pygame.Rect(dropdown_rect.x, y_pos, dropdown_rect.width, self.item_height)
                 
@@ -118,12 +144,23 @@ class Dropdown:
                     pygame.draw.rect(surface, Color.LIGHT_GRAY, item_rect)
                 
                 # Draw separator line
-                if i < len(self.options[:self.max_visible]) - 1:
+                if i < len(visible_options) - 1:
                     pygame.draw.line(surface, Color.BORDER, (item_rect.x, item_rect.y + self.item_height), 
                                    (item_rect.x + item_rect.width, item_rect.y + self.item_height), 1)
                 
                 option_text = font.render(option, True, Color.BLACK)
                 surface.blit(option_text, (item_rect.x + 10, item_rect.y + 9))
+
+            # Scrollbar for long lists.
+            if len(self.options) > self.max_visible:
+                track_rect = pygame.Rect(dropdown_rect.right - 7, dropdown_rect.y + 2, 5, dropdown_rect.height - 4)
+                pygame.draw.rect(surface, Color.LIGHT_GRAY, track_rect)
+
+                thumb_height = max(16, int(track_rect.height * (self.max_visible / len(self.options))))
+                max_offset = len(self.options) - self.max_visible
+                ratio = 0 if max_offset == 0 else (self.scroll_offset / max_offset)
+                thumb_y = track_rect.y + int((track_rect.height - thumb_height) * ratio)
+                pygame.draw.rect(surface, Color.DARK_GRAY, (track_rect.x, thumb_y, track_rect.width, thumb_height))
 
     def is_clicked(self, pos):
         return self.rect.collidepoint(pos)
@@ -131,9 +168,8 @@ class Dropdown:
     def get_clicked_option(self, pos):
         if not self.open or not self.options:
             return None
-        
-        dropdown_height = min(len(self.options), self.max_visible) * self.item_height
-        dropdown_rect = pygame.Rect(self.rect.x, self.rect.y + self.rect.height + 2, self.rect.width, dropdown_height)
+
+        dropdown_rect = self.get_dropdown_rect()
         
         if not dropdown_rect.collidepoint(pos):
             return None
@@ -141,8 +177,9 @@ class Dropdown:
         relative_y = pos[1] - dropdown_rect.y
         item_index = relative_y // self.item_height
         
-        if 0 <= item_index < len(self.options):
-            return self.options[item_index]
+        option_index = self.scroll_offset + item_index
+        if 0 <= option_index < len(self.options):
+            return self.options[option_index]
         
         return None
 
@@ -152,6 +189,8 @@ class Dropdown:
 
     def toggle(self):
         self.open = not self.open
+        if self.open:
+            self.scroll_offset = 0
 
 
 class GUIManager:
@@ -179,6 +218,8 @@ class GUIManager:
         self.btn_pausar = Button(515, 10, 85, 35, "PAUSAR", Color.DARK_GRAY)
         self.btn_reiniciar = Button(610, 10, 85, 35, "REINICIAR", Color.RED)
         self.btn_reporte = Button(705, 10, 85, 35, "REPORTE", Color.BLUE)
+        self.btn_crear_producto = Button(1025, 10, 165, 35, "CREAR PRODUCTOS", Color.ORANGE)
+        self.input_cantidad_producto = InputField(965, 10, 55, 35, "Cant")
 
         self.crear_proceso_expanded = False
         self.agregar_tarea_expanded = False
@@ -203,6 +244,156 @@ class GUIManager:
         self.dropdown_hacia = Dropdown(20, 625, 220, 35, self.procesos_list, "Hacia")
         self.btn_conectar = Button(20, 670, 220, 35, "CONECTAR", Color.LIGHT_GRAY, Color.DARK_GRAY)
 
+        self.products_count = 0
+        self.process_products = {}
+        self.process_meta = {}
+        self.process_connections = {}
+        self.sidebar_scroll = 0
+        self.main_scroll_x = 0
+        self.main_max_scroll = 0
+        self.main_scroll_track_rect = None
+        self.main_scroll_thumb_rect = None
+        self.main_scroll_dragging = False
+        self.main_scroll_drag_offset = 0
+
+    def _left_sy(self, y):
+        return y - self.sidebar_scroll
+
+    def _left_panel_rect(self):
+        return pygame.Rect(0, 60, 260, self.height - 100)
+
+    def _main_panel_rect(self):
+        return pygame.Rect(280, 80, 600, self.height - 140)
+
+    def _left_content_bottom(self):
+        layout = self._get_sidebar_layout()
+        y = layout["procesos_title_y"]
+        return y + 30 + len(self.procesos_list) * 20 + 20
+
+    def _max_sidebar_scroll(self):
+        panel_bottom = self.height - 40
+        overflow = self._left_content_bottom() - panel_bottom
+        return max(0, overflow + 10)
+
+    def _scroll_sidebar(self, wheel_y):
+        self.sidebar_scroll = max(0, min(self._max_sidebar_scroll(), self.sidebar_scroll - wheel_y * 24))
+
+    def _create_products(self, qty):
+        if qty <= 0:
+            return
+        self.products_count += qty
+        if self.procesos_list:
+            process_order = self._get_display_process_order()
+            first_process = process_order[0] if process_order else self.procesos_list[0]
+            self.process_products[first_process] = self.process_products.get(first_process, 0) + qty
+
+    def _get_display_process_order(self):
+        if not self.procesos_list:
+            return []
+
+        ordered = []
+        visited = set()
+        valid_nodes = set(self.procesos_list)
+
+        next_map = {}
+        indegree = {p: 0 for p in self.procesos_list}
+        for src, dst in self.process_connections.items():
+            if src in valid_nodes and dst in valid_nodes and src != dst:
+                next_map[src] = dst
+                indegree[dst] += 1
+
+        starts = [p for p in self.procesos_list if indegree[p] == 0]
+        for start in starts:
+            cur = start
+            while cur and cur not in visited:
+                ordered.append(cur)
+                visited.add(cur)
+                cur = next_map.get(cur)
+
+        for process_name in self.procesos_list:
+            cur = process_name
+            while cur and cur not in visited:
+                ordered.append(cur)
+                visited.add(cur)
+                cur = next_map.get(cur)
+
+        return ordered
+
+    def _draw_process_pipe(self, src_rect, dst_rect):
+        color = (83, 138, 201)
+        thickness = 5
+        start = (src_rect.right + 2, src_rect.centery)
+        end = (dst_rect.left - 2, dst_rect.centery)
+
+        # Use a simple horizontal connector when possible to keep the path clean.
+        if abs(start[1] - end[1]) <= 8:
+            pygame.draw.line(self.screen, color, start, end, thickness)
+        else:
+            mid_x = (start[0] + end[0]) // 2
+            p1 = start
+            p2 = (mid_x, start[1])
+            p3 = (mid_x, end[1])
+            p4 = end
+            pygame.draw.line(self.screen, color, p1, p2, thickness)
+            pygame.draw.line(self.screen, color, p2, p3, thickness)
+            pygame.draw.line(self.screen, color, p3, p4, thickness)
+            pygame.draw.circle(self.screen, color, p2, 4)
+            pygame.draw.circle(self.screen, color, p3, 4)
+
+        # Arrow tip on destination side.
+        arrow = [(end[0], end[1]), (end[0] - 10, end[1] - 6), (end[0] - 10, end[1] + 6)]
+        pygame.draw.polygon(self.screen, color, arrow)
+
+    def _dropdown_extra_height(self, dropdown):
+        if dropdown.open and dropdown.options:
+            return dropdown.get_dropdown_rect().height + 2
+        return 0
+
+    def _get_sidebar_layout(self):
+        section_gap = 14
+        y = 120
+        crear_y = y
+        # Expanded height must match actual drawn controls in each section.
+        y += (35 + 153 + section_gap) if self.crear_proceso_expanded else 32
+
+        agregar_y = y
+        agregar_extra = self._dropdown_extra_height(self.dropdown_proceso_tarea) if self.agregar_tarea_expanded else 0
+        y += (35 + 215 + section_gap + agregar_extra) if self.agregar_tarea_expanded else 32
+
+        conectar_y = y
+        conectar_extra_desde = self._dropdown_extra_height(self.dropdown_desde) if self.conectar_procesos_expanded else 0
+        conectar_extra_hacia = self._dropdown_extra_height(self.dropdown_hacia) if self.conectar_procesos_expanded else 0
+        y += (35 + 125 + section_gap + conectar_extra_desde + conectar_extra_hacia) if self.conectar_procesos_expanded else 32
+
+        return {
+            "crear_y": crear_y,
+            "agregar_y": agregar_y,
+            "conectar_y": conectar_y,
+            "agregar_extra": agregar_extra,
+            "conectar_extra_desde": conectar_extra_desde,
+            "conectar_extra_hacia": conectar_extra_hacia,
+            "procesos_title_y": y + 20,
+        }
+
+    def _draw_disclosure_arrow(self, x, y, expanded):
+        if expanded:
+            points = [(x, y), (x + 10, y), (x + 5, y + 8)]
+        else:
+            points = [(x, y), (x + 8, y + 5), (x, y + 10)]
+        pygame.draw.polygon(self.screen, Color.BLUE, points)
+
+    def _tasks_for_process(self, process_name):
+        tasks = []
+        for name, data in self.tareas_list.items():
+            if data.get("proceso") == process_name:
+                try:
+                    order = int(data.get("orden", "9999") or "9999")
+                except ValueError:
+                    order = 9999
+                tasks.append((order, name, data.get("tiempo", "")))
+        tasks.sort(key=lambda item: item[0])
+        return tasks
+
     def draw_header(self):
         pygame.draw.rect(self.screen, Color.HEADER_BG, (0, 0, self.width, 50))
         title = self.font_title.render("Sistema de Simulación de Producción", True, Color.WHITE)
@@ -213,61 +404,62 @@ class GUIManager:
         self.btn_reiniciar.draw(self.screen, self.font_small)
         self.btn_reporte.draw(self.screen, self.font_small)
 
+        self.input_cantidad_producto.draw(self.screen, self.font_small)
+        self.btn_crear_producto.draw(self.screen, self.font_small)
+
     def draw_sidebar_left(self):
+        panel_rect = self._left_panel_rect()
         pygame.draw.rect(self.screen, Color.SIDEBAR_BG, (0, 60, 260, self.height - 80))
         pygame.draw.line(self.screen, Color.BORDER, (260, 60), (260, self.height - 40), 2)
 
+        old_clip = self.screen.get_clip()
+        self.screen.set_clip(panel_rect)
+
         titulo = self.font_title.render("Configuración", True, Color.BLACK)
-        self.screen.blit(titulo, (20, 75))
+        self.screen.blit(titulo, (20, self._left_sy(75)))
 
-        y = 120
-        self._draw_section("Crear Proceso", y, self.crear_proceso_expanded, self._draw_crear_proceso)
-        
-        if self.crear_proceso_expanded:
-            y += 35 + 110
-        else:
-            y += 25
+        layout = self._get_sidebar_layout()
+        self._draw_section("Crear Proceso", layout["crear_y"], self.crear_proceso_expanded, self._draw_crear_proceso)
+        self._draw_section("Agregar Tarea", layout["agregar_y"], self.agregar_tarea_expanded, self._draw_agregar_tarea)
+        self._draw_section("Conectar Procesos", layout["conectar_y"], self.conectar_procesos_expanded, self._draw_conectar)
 
-        self._draw_section("Agregar Tarea", y, self.agregar_tarea_expanded, self._draw_agregar_tarea)
-        
-        if self.agregar_tarea_expanded:
-            y += 35 + 190
-        else:
-            y += 25
-
-        self._draw_section("Conectar Procesos", y, self.conectar_procesos_expanded, self._draw_conectar)
-        
-        if self.conectar_procesos_expanded:
-            y += 35 + 120
-        else:
-            y += 25
-
-        y += 20
+        y = layout["procesos_title_y"]
         titulo_procesos = self.font_normal.render("Procesos Creados", True, Color.BLACK)
-        self.screen.blit(titulo_procesos, (20, y))
+        self.screen.blit(titulo_procesos, (20, self._left_sy(y)))
         
-        for i, proceso in enumerate(self.procesos_list):
+        process_order = self._get_display_process_order()
+        for i, proceso in enumerate(process_order):
             texto = self.font_small.render(f"• {proceso}", True, Color.DARK_GRAY)
-            self.screen.blit(texto, (30, y + 30 + i * 20))
+            self.screen.blit(texto, (30, self._left_sy(y + 30 + i * 20)))
+
+        self.screen.set_clip(old_clip)
+
+        max_scroll = self._max_sidebar_scroll()
+        if max_scroll > 0:
+            track = pygame.Rect(250, 70, 6, self.height - 120)
+            pygame.draw.rect(self.screen, Color.LIGHT_GRAY, track)
+            thumb_h = max(30, int(track.height * (track.height / (track.height + max_scroll))))
+            ratio = self.sidebar_scroll / max_scroll
+            thumb_y = track.y + int((track.height - thumb_h) * ratio)
+            pygame.draw.rect(self.screen, Color.DARK_GRAY, (track.x, thumb_y, track.width, thumb_h))
 
     def _draw_section(self, title, y, expanded, draw_func):
-        arrow = "▼" if expanded else "▶"
-        arrow_text = self.font_arrow.render(arrow, True, Color.BLUE)
-        self.screen.blit(arrow_text, (10, y - 3))
+        sy = self._left_sy(y)
+        self._draw_disclosure_arrow(12, sy + 4, expanded)
         
         title_text = self.font_normal.render(title, True, Color.BLACK)
-        self.screen.blit(title_text, (35, y))
+        self.screen.blit(title_text, (35, sy))
         
-        pygame.draw.line(self.screen, Color.BORDER, (15, y + 22), (235, y + 22), 1)
+        pygame.draw.line(self.screen, Color.BORDER, (15, sy + 22), (235, sy + 22), 1)
 
         if expanded:
             draw_func(y + 35)
 
     def _draw_crear_proceso(self, y):
-        self.input_proceso_name.rect.y = y
+        self.input_proceso_name.rect.y = self._left_sy(y)
         self.input_proceso_name.draw(self.screen, self.font_small)
         
-        check_y = y + 50
+        check_y = self._left_sy(y + 54)
         pygame.draw.rect(self.screen, Color.BORDER, (20, check_y, 18, 18), 2)
         if self.checkbox_inicial:
             pygame.draw.rect(self.screen, Color.BLUE, (20, check_y, 18, 18))
@@ -276,7 +468,7 @@ class GUIManager:
         check_label = self.font_small.render("¿Es inicial?", True, Color.BLACK)
         self.screen.blit(check_label, (45, check_y))
 
-        check_y2 = y + 75
+        check_y2 = self._left_sy(y + 84)
         pygame.draw.rect(self.screen, Color.BORDER, (20, check_y2, 18, 18), 2)
         if self.checkbox_final:
             pygame.draw.rect(self.screen, Color.BLUE, (20, check_y2, 18, 18))
@@ -285,41 +477,179 @@ class GUIManager:
         check_label2 = self.font_small.render("¿Es final?", True, Color.BLACK)
         self.screen.blit(check_label2, (45, check_y2))
 
-        self.btn_crear_proceso.rect.y = y + 85
+        self.btn_crear_proceso.rect.y = self._left_sy(y + 118)
         self.btn_crear_proceso.draw(self.screen, self.font_small)
 
     def _draw_agregar_tarea(self, y):
-        self.dropdown_proceso_tarea.rect.y = y
+        dropdown_extra = self._dropdown_extra_height(self.dropdown_proceso_tarea)
+        self.dropdown_proceso_tarea.rect.y = self._left_sy(y)
         self.dropdown_proceso_tarea.draw(self.screen, self.font_small)
         
-        self.input_tarea_name.rect.y = y + 45
+        self.input_tarea_name.rect.y = self._left_sy(y + 45 + dropdown_extra)
         self.input_tarea_name.draw(self.screen, self.font_small)
         
-        self.input_tiempo_proceso.rect.y = y + 90
+        self.input_tiempo_proceso.rect.y = self._left_sy(y + 90 + dropdown_extra)
         self.input_tiempo_proceso.draw(self.screen, self.font_small)
         
-        self.input_orden.rect.y = y + 135
+        self.input_orden.rect.y = self._left_sy(y + 135 + dropdown_extra)
         self.input_orden.draw(self.screen, self.font_small)
         
-        self.btn_agregar_tarea.rect.y = y + 145
+        self.btn_agregar_tarea.rect.y = self._left_sy(y + 180 + dropdown_extra)
         self.btn_agregar_tarea.draw(self.screen, self.font_small)
 
     def _draw_conectar(self, y):
-        self.dropdown_desde.rect.y = y
+        extra_desde = self._dropdown_extra_height(self.dropdown_desde)
+        y_hacia = y + 45 + extra_desde
+        extra_hacia = self._dropdown_extra_height(self.dropdown_hacia)
+        y_btn = y_hacia + 45 + extra_hacia
+
+        self.dropdown_desde.rect.y = self._left_sy(y)
         self.dropdown_desde.draw(self.screen, self.font_small)
         
-        self.dropdown_hacia.rect.y = y + 45
+        self.dropdown_hacia.rect.y = self._left_sy(y_hacia)
         self.dropdown_hacia.draw(self.screen, self.font_small)
         
-        self.btn_conectar.rect.y = y + 55
+        self.btn_conectar.rect.y = self._left_sy(y_btn)
         self.btn_conectar.draw(self.screen, self.font_small)
 
     def draw_main_area(self):
         pygame.draw.rect(self.screen, Color.MAIN_BG, (260, 60, 640, self.height - 80))
-        pygame.draw.rect(self.screen, Color.WHITE, (280, 80, 600, 280), 2)
-        texto = self.font_normal.render("Visualización de Procesos", True, Color.TEXT_GRAY)
-        text_rect = texto.get_rect(center=(580, 220))
-        self.screen.blit(texto, text_rect)
+        panel_rect = self._main_panel_rect()
+        pygame.draw.rect(self.screen, Color.WHITE, panel_rect, 2)
+
+        title = self.font_normal.render("Visualizacion de Procesos", True, Color.TEXT_GRAY)
+        self.screen.blit(title, (300, 95))
+
+        if not self.procesos_list:
+            texto = self.font_normal.render("Crea un proceso para comenzar", True, Color.TEXT_GRAY)
+            text_rect = texto.get_rect(center=(580, 220))
+            self.screen.blit(texto, text_rect)
+            products_base_y = 380
+            self.main_scroll_x = 0
+            self.main_max_scroll = 0
+            self.main_scroll_track_rect = None
+            self.main_scroll_thumb_rect = None
+        else:
+            process_order = self._get_display_process_order()
+            card_w = 285
+            card_h = 282
+            col_gap = 22
+            lane_left = panel_rect.x + 12
+            start_y = 115
+            lane_w = len(process_order) * card_w + max(0, len(process_order) - 1) * col_gap
+            viewport_w = panel_rect.width - 24
+            self.main_max_scroll = max(0, lane_w - viewport_w)
+            self.main_scroll_x = max(0, min(self.main_max_scroll, self.main_scroll_x))
+
+            old_clip = self.screen.get_clip()
+            self.screen.set_clip(pygame.Rect(panel_rect.x + 2, panel_rect.y + 2, panel_rect.width - 4, panel_rect.height - 4))
+            card_rects = {}
+
+            for i, proceso in enumerate(process_order):
+                x = lane_left + i * (card_w + col_gap) - self.main_scroll_x
+                y = start_y
+                card_rect = pygame.Rect(x, y, card_w, card_h)
+                card_rects[proceso] = card_rect
+
+                pygame.draw.rect(self.screen, Color.CARD_GREEN_LIGHT, card_rect, border_radius=4)
+                pygame.draw.rect(self.screen, Color.CARD_GREEN, card_rect, 2, border_radius=4)
+
+                title_text = self.font_title.render(proceso, True, Color.BLACK)
+                self.screen.blit(title_text, (x + 18, y + 14))
+
+                meta = self.process_meta.get(proceso, {"inicial": False, "final": False})
+                if meta.get("inicial"):
+                    init_rect = pygame.Rect(x + 18, y + 48, 62, 28)
+                    pygame.draw.rect(self.screen, Color.CARD_GREEN_DARK, init_rect, border_radius=14)
+                    init_text = self.font_normal.render("Inicial", True, Color.WHITE)
+                    self.screen.blit(init_text, (x + 26, y + 55))
+                elif meta.get("final"):
+                    final_rect = pygame.Rect(x + 18, y + 48, 54, 28)
+                    pygame.draw.rect(self.screen, Color.ORANGE, final_rect, border_radius=14)
+                    final_text = self.font_normal.render("Final", True, Color.WHITE)
+                    self.screen.blit(final_text, (x + 27, y + 55))
+
+                tasks = self._tasks_for_process(proceso)
+                if tasks:
+                    order, task_name, tiempo = tasks[0]
+                    task_rect = pygame.Rect(x + 18, y + 88, card_w - 36, 160)
+                    pygame.draw.rect(self.screen, (207, 214, 210), task_rect, border_radius=4)
+                    pygame.draw.rect(self.screen, Color.CARD_GREEN, task_rect, 2, border_radius=4)
+
+                    pygame.draw.circle(self.screen, Color.CARD_GREEN, (x + 50, y + 126), 9)
+                    task_title = self.font_title.render(task_name, True, (30, 30, 30))
+                    self.screen.blit(task_title, (x + 70, y + 116))
+
+                    estado_label = self.font_normal.render("Estado:", True, (90, 90, 90))
+                    self.screen.blit(estado_label, (x + 40, y + 156))
+                    libre_rect = pygame.Rect(x + 98, y + 148, 62, 28)
+                    pygame.draw.rect(self.screen, Color.CARD_GREEN, libre_rect, border_radius=14)
+                    libre_text = self.font_normal.render("Libre", True, Color.WHITE)
+                    self.screen.blit(libre_text, (x + 109, y + 155))
+
+                    fifo_rect = pygame.Rect(x + 40, y + 186, card_w - 78, 50)
+                    pygame.draw.rect(self.screen, (220, 224, 221), fifo_rect, border_radius=4)
+                    pygame.draw.rect(self.screen, (190, 194, 191), fifo_rect, 1, border_radius=4)
+                    fifo_label = self.font_normal.render("Cola FIFO:", True, (85, 85, 85))
+                    self.screen.blit(fifo_label, (x + 50, y + 190))
+
+                    cola = self.process_products.get(proceso, 0)
+                    fifo_count = self.font_title.render(str(cola), True, (35, 35, 35))
+                    self.screen.blit(fifo_count, (x + 50, y + 206))
+                    fifo_text = self.font_normal.render("producto(s) en espera", True, (85, 85, 85))
+                    self.screen.blit(fifo_text, (x + 74, y + 212))
+
+                    foot_text = self.font_normal.render(f"Orden: {order} | Tiempo: {tiempo} ciclos", True, (90, 90, 90))
+                    self.screen.blit(foot_text, (x + 40, y + 258))
+
+                    if len(tasks) > 1:
+                        more_tasks = self.font_small.render(f"+{len(tasks) - 1} tarea(s) mas", True, Color.TEXT_GRAY)
+                        self.screen.blit(more_tasks, (x + card_w - 120, y + 66))
+                else:
+                    empty_text = self.font_normal.render("Sin tareas", True, Color.TEXT_GRAY)
+                    self.screen.blit(empty_text, (x + 18, y + 98))
+
+            for src_name, dst_name in self.process_connections.items():
+                if src_name in card_rects and dst_name in card_rects:
+                    self._draw_process_pipe(card_rects[src_name], card_rects[dst_name])
+
+            self.screen.set_clip(old_clip)
+            cards_bottom = start_y + card_h
+            products_base_y = max(380, cards_bottom + 24)
+
+            if self.main_max_scroll > 0:
+                track = pygame.Rect(panel_rect.x + 14, panel_rect.bottom - 16, panel_rect.width - 28, 6)
+                pygame.draw.rect(self.screen, Color.LIGHT_GRAY, track)
+                thumb_w = max(40, int(track.width * (viewport_w / lane_w)))
+                ratio = self.main_scroll_x / self.main_max_scroll if self.main_max_scroll else 0
+                thumb_x = track.x + int((track.width - thumb_w) * ratio)
+                thumb_rect = pygame.Rect(thumb_x, track.y - 2, thumb_w, track.height + 4)
+                pygame.draw.rect(self.screen, Color.DARK_GRAY, thumb_rect)
+                self.main_scroll_track_rect = track
+                self.main_scroll_thumb_rect = thumb_rect
+            else:
+                self.main_scroll_track_rect = None
+                self.main_scroll_thumb_rect = None
+
+        products_title = self.font_normal.render("Productos creados", True, Color.DARK_GRAY)
+        self.screen.blit(products_title, (300, products_base_y))
+
+        # Single visual box + count to avoid clutter.
+        bx, by = 320, products_base_y + 40
+        front_rect = pygame.Rect(bx, by, 95, 70)
+        top_poly = [(bx, by), (bx + 20, by - 14), (bx + 115, by - 14), (bx + 95, by)]
+        side_poly = [(bx + 95, by), (bx + 115, by - 14), (bx + 115, by + 56), (bx + 95, by + 70)]
+
+        pygame.draw.polygon(self.screen, (230, 197, 130), top_poly)
+        pygame.draw.polygon(self.screen, (205, 166, 99), side_poly)
+        pygame.draw.rect(self.screen, (219, 180, 112), front_rect)
+        pygame.draw.rect(self.screen, Color.BORDER, front_rect, 2)
+        pygame.draw.line(self.screen, (170, 130, 70), (bx + 48, by), (bx + 48, by + 70), 2)
+
+        count_text = self.font_large.render(f"x{self.products_count}", True, Color.BLUE)
+        self.screen.blit(count_text, (450, by + 18))
+        count_label = self.font_small.render("productos en cola", True, Color.TEXT_GRAY)
+        self.screen.blit(count_label, (452, by + 52))
 
     def draw_sidebar_right(self):
         pygame.draw.rect(self.screen, Color.SIDEBAR_BG, (900, 60, 300, self.height - 80))
@@ -387,6 +717,34 @@ class GUIManager:
             if event.type == pygame.QUIT:
                 return False
 
+            if event.type == pygame.MOUSEWHEEL:
+                mouse_pos = pygame.mouse.get_pos()
+                handled = False
+                for dropdown in [self.dropdown_proceso_tarea, self.dropdown_desde, self.dropdown_hacia]:
+                    if dropdown.handle_wheel(mouse_pos, event.y):
+                        handled = True
+                        break
+                if not handled and self._left_panel_rect().collidepoint(mouse_pos):
+                    self._scroll_sidebar(event.y)
+                    handled = True
+                if not handled and self._main_panel_rect().collidepoint(mouse_pos):
+                    self.main_scroll_x = max(0, min(self.main_max_scroll, self.main_scroll_x - event.y * 40))
+                    handled = True
+                if handled:
+                    continue
+
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                self.main_scroll_dragging = False
+
+            if event.type == pygame.MOUSEMOTION and self.main_scroll_dragging:
+                if self.main_scroll_track_rect and self.main_scroll_thumb_rect and self.main_max_scroll > 0:
+                    min_x = self.main_scroll_track_rect.x
+                    max_x = self.main_scroll_track_rect.right - self.main_scroll_thumb_rect.width
+                    new_x = max(min_x, min(max_x, event.pos[0] - self.main_scroll_drag_offset))
+                    track_range = max(1, max_x - min_x)
+                    ratio = (new_x - min_x) / track_range
+                    self.main_scroll_x = int(ratio * self.main_max_scroll)
+
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.btn_iniciar.is_clicked(event.pos):
                     self.state = SimulationState.RUNNING
@@ -395,29 +753,45 @@ class GUIManager:
                 elif self.btn_reiniciar.is_clicked(event.pos):
                     self.state = SimulationState.STOPPED
                     self.tiempo_global = 0
+                elif self.btn_crear_producto.is_clicked(event.pos):
+                    qty_text = self.input_cantidad_producto.text.strip()
+                    qty = int(qty_text) if qty_text.isdigit() else 1
+                    self._create_products(qty)
+                elif self.main_scroll_thumb_rect and self.main_scroll_thumb_rect.collidepoint(event.pos):
+                    self.main_scroll_dragging = True
+                    self.main_scroll_drag_offset = event.pos[0] - self.main_scroll_thumb_rect.x
+                elif self.main_scroll_track_rect and self.main_scroll_track_rect.collidepoint(event.pos):
+                    if self.main_scroll_thumb_rect and self.main_max_scroll > 0:
+                        target_x = event.pos[0] - self.main_scroll_thumb_rect.width // 2
+                        min_x = self.main_scroll_track_rect.x
+                        max_x = self.main_scroll_track_rect.right - self.main_scroll_thumb_rect.width
+                        clamped_x = max(min_x, min(max_x, target_x))
+                        track_range = max(1, max_x - min_x)
+                        ratio = (clamped_x - min_x) / track_range
+                        self.main_scroll_x = int(ratio * self.main_max_scroll)
 
                 # Section toggles
-                elif 15 < event.pos[0] < 35 and 115 < event.pos[1] < 140:
+                layout = self._get_sidebar_layout()
+                if 15 < event.pos[0] < 35 and self._left_sy(layout["crear_y"] - 5) < event.pos[1] < self._left_sy(layout["crear_y"] + 20):
                     self.crear_proceso_expanded = not self.crear_proceso_expanded
-                elif 15 < event.pos[0] < 35:
-                    y1 = 115 + 30 + (120 if self.crear_proceso_expanded else 0)
-                    if y1 < event.pos[1] < y1 + 25:
+                    self.sidebar_scroll = min(self.sidebar_scroll, self._max_sidebar_scroll())
+                elif 15 < event.pos[0] < 35 and self._left_sy(layout["agregar_y"] - 5) < event.pos[1] < self._left_sy(layout["agregar_y"] + 20):
                         self.agregar_tarea_expanded = not self.agregar_tarea_expanded
-                    
-                    y2 = y1 + 30 + (200 if self.agregar_tarea_expanded else 0)
-                    if y2 < event.pos[1] < y2 + 25:
+                        self.sidebar_scroll = min(self.sidebar_scroll, self._max_sidebar_scroll())
+                elif 15 < event.pos[0] < 35 and self._left_sy(layout["conectar_y"] - 5) < event.pos[1] < self._left_sy(layout["conectar_y"] + 20):
                         self.conectar_procesos_expanded = not self.conectar_procesos_expanded
+                        self.sidebar_scroll = min(self.sidebar_scroll, self._max_sidebar_scroll())
 
                 # Checkboxes
                 elif 20 < event.pos[0] < 38:
-                    check_y = 115 + 35 + 50
-                    if self.crear_proceso_expanded and check_y < event.pos[1] < check_y + 18:
+                    check_y = layout["crear_y"] + 35 + 54
+                    if self.crear_proceso_expanded and self._left_sy(check_y) < event.pos[1] < self._left_sy(check_y + 18):
                         self.checkbox_inicial = not self.checkbox_inicial
                         if self.checkbox_inicial:
                             self.checkbox_final = False
                     
-                    check_y2 = 115 + 35 + 75
-                    if self.crear_proceso_expanded and check_y2 < event.pos[1] < check_y2 + 18:
+                    check_y2 = layout["crear_y"] + 35 + 84
+                    if self.crear_proceso_expanded and self._left_sy(check_y2) < event.pos[1] < self._left_sy(check_y2 + 18):
                         self.checkbox_final = not self.checkbox_final
                         if self.checkbox_final:
                             self.checkbox_inicial = False
@@ -425,43 +799,76 @@ class GUIManager:
                 # Dropdowns
                 if self.dropdown_proceso_tarea.is_clicked(event.pos):
                     self.dropdown_proceso_tarea.toggle()
+                    self.dropdown_desde.open = False
+                    self.dropdown_hacia.open = False
                 elif self.dropdown_proceso_tarea.open:
                     option = self.dropdown_proceso_tarea.get_clicked_option(event.pos)
                     if option:
                         self.dropdown_proceso_tarea.select(option)
+                    elif not self.dropdown_proceso_tarea.get_dropdown_rect().collidepoint(event.pos):
+                        self.dropdown_proceso_tarea.open = False
 
                 if self.dropdown_desde.is_clicked(event.pos):
                     self.dropdown_desde.toggle()
+                    self.dropdown_proceso_tarea.open = False
+                    self.dropdown_hacia.open = False
                 elif self.dropdown_desde.open:
                     option = self.dropdown_desde.get_clicked_option(event.pos)
                     if option:
                         self.dropdown_desde.select(option)
+                    elif not self.dropdown_desde.get_dropdown_rect().collidepoint(event.pos):
+                        self.dropdown_desde.open = False
 
                 if self.dropdown_hacia.is_clicked(event.pos):
                     self.dropdown_hacia.toggle()
+                    self.dropdown_proceso_tarea.open = False
+                    self.dropdown_desde.open = False
                 elif self.dropdown_hacia.open:
                     option = self.dropdown_hacia.get_clicked_option(event.pos)
                     if option:
                         self.dropdown_hacia.select(option)
+                    elif not self.dropdown_hacia.get_dropdown_rect().collidepoint(event.pos):
+                        self.dropdown_hacia.open = False
 
                 # Buttons
                 if self.btn_crear_proceso.is_clicked(event.pos):
                     if self.input_proceso_name.text:
-                        self.procesos_list.append(self.input_proceso_name.text)
+                        process_name = self.input_proceso_name.text.strip()
+                        if process_name and process_name not in self.procesos_list:
+                            self.procesos_list.append(process_name)
+                            self.process_products[process_name] = self.process_products.get(process_name, 0)
+                            self.process_meta[process_name] = {
+                                "inicial": self.checkbox_inicial,
+                                "final": self.checkbox_final,
+                            }
+                            self.sidebar_scroll = min(self.sidebar_scroll, self._max_sidebar_scroll())
+                            self.checkbox_inicial = False
+                            self.checkbox_final = False
                         self.input_proceso_name.text = ""
                 elif self.btn_agregar_tarea.is_clicked(event.pos):
-                    if self.input_tarea_name.text:
+                    if self.input_tarea_name.text and self.dropdown_proceso_tarea.selected:
                         self.tareas_list[self.input_tarea_name.text] = {
                             "proceso": self.dropdown_proceso_tarea.selected,
                             "tiempo": self.input_tiempo_proceso.text,
                             "orden": self.input_orden.text
                         }
                         self.input_tarea_name.text = ""
+                elif self.btn_conectar.is_clicked(event.pos):
+                    desde = self.dropdown_desde.selected
+                    hacia = self.dropdown_hacia.selected
+                    if desde and hacia and desde != hacia:
+                        self.process_connections[desde] = hacia
+                        # Keep one incoming link per process for a clean single-chain visualization.
+                        for src, dst in list(self.process_connections.items()):
+                            if src != desde and dst == hacia:
+                                del self.process_connections[src]
 
             self.input_proceso_name.handle_event(event)
             self.input_tarea_name.handle_event(event)
             self.input_tiempo_proceso.handle_event(event)
             self.input_orden.handle_event(event)
+            self.input_cantidad_producto.handle_event(event)
+            self.input_cantidad_producto.text = "".join(ch for ch in self.input_cantidad_producto.text if ch.isdigit())[:4]
 
         return True
 
