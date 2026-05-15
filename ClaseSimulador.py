@@ -5,7 +5,7 @@ class Simulador:
         self.activo = False
 
     def ejecutar(self, ciclos):
-        if self.linea.iniciar_simulacion() == False:
+        if self.linea.iniciarSimulacion() == False:
             return
 
         self.activo = True
@@ -15,7 +15,7 @@ class Simulador:
                 break
 
             self.avanzar_tiempo()
-            self.linea.mostrar_estado()
+            self.linea.mostrarEstado()
 
     def detener(self):
         self.activo = False
@@ -29,4 +29,4 @@ class Simulador:
     def avanzar_tiempo(self):
         self.ciclo_actual += 1
         print("\nCiclo:", self.ciclo_actual)
-        self.linea.avanzar_ciclo()
+        self.linea.avanzarCiclo()
