@@ -21,12 +21,16 @@ class Proceso:
         return None
 
     def avanzar_ciclo(self):
+        # Skip if no tasks
+        if not self.tareas:
+            return
+            
         if not self.cola_entrada.empty() and self.tareas[0].esta_disponible():
             producto = self.cola_entrada.get()
             self.tareas[0].agregar_cola(producto)
         for i, tarea in enumerate(self.tareas):
             if tarea.esta_disponible() and tarea.obtener_tamaño_cola() > 0:
-                tarea.iniciar_proceso(producto=None)
+                tarea.iniciar_proceso()
 
             producto_completado = tarea.avanzar_ciclo()
 
