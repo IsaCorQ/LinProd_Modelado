@@ -11,6 +11,8 @@ class Proceso:
         self.cola_salida = Queue()
         self.proceso_anterior = None
         self.proceso_siguiente = None
+        self.esInicial = False
+        self.esFinal = False
 
     def agregar_producto(self, producto):
         self.cola_entrada.put(producto)
@@ -21,6 +23,9 @@ class Proceso:
         return None
 
     def avanzar_ciclo(self):
+        if not self.tareas:
+            return
+            
         if not self.cola_entrada.empty() and self.tareas[0].esta_disponible():
             producto = self.cola_entrada.get()
             self.tareas[0].agregar_cola(producto)
@@ -51,6 +56,38 @@ class Proceso:
                 'tiempo_restante': tarea.tiempo_restante
             })
         return estado
+
+    def agregarTarea(self, tarea):
+        """Adds a task to this process"""
+        self.tareas.append(tarea)
+
+    def obtenerSiguienteTarea(self):
+        """Gets the next available task"""
+        for tarea in self.tareas:
+            if tarea.esta_disponible():
+                return tarea
+        return None
+
+    def procesar(self):
+        """Process all tasks in this process"""
+        for tarea in self.tareas:
+            tarea.avanzar_ciclo()
+
+    def calcularCongestion(self):
+        """Calculate the congestion level of this process (0-100)"""
+        if not self.tareas:
+            return 0
+        
+        total_en_cola = 0
+        for tarea in self.tareas:
+            total_en_cola += tarea.obtener_tamaño_cola()
+            if tarea.esta_procesando:
+                total_en_cola += 1
+        
+        # Congestion is based on average queue size per task
+        # Scale from 0-100 where 10+ items per task = 100% congestion
+        congestion = min(100, int((total_en_cola / len(self.tareas)) * 10))
+        return congestion
 
     def conectar_siguiente(self, proceso):
         self.proceso_siguiente = proceso

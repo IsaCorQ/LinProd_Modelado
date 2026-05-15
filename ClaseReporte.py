@@ -8,7 +8,7 @@ class Reporte:
         self.promedio_espera = 0
 
     def generar_reporte(self):
-        productos = self.linea.productos_completados
+        productos = self.linea.productosCompletados
 
         if len(productos) == 0:
             print("\nNo hay productos completados.")
@@ -62,3 +62,4 @@ class Reporte:
 
     def exportar_pdf(self):
         print("Exportar PDF no implementado.")
+        return None
