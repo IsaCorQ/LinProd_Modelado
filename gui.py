@@ -202,9 +202,14 @@ class Dropdown:
 class GUIManager:
     def __init__(self, width=1200, height=750):
         pygame.init()
+        # Store initial dimensions for scaling
+        self.initial_width = width
+        self.initial_height = height
         self.width = width
         self.height = height
-        self.screen = pygame.display.set_mode((width, height))
+        
+        # Make window resizable
+        self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
         pygame.display.set_caption("Sistema de Simulación de Producción")
 
         self.font_title = pygame.font.Font(None, 28)
@@ -276,11 +281,24 @@ class GUIManager:
     def _left_sy(self, y):
         return y - self.sidebar_scroll
 
+    def _get_scale_factor(self):
+        """Calculate scale factor based on current window size"""
+        scale_x = self.width / self.initial_width
+        scale_y = self.height / self.initial_height
+        return scale_x, scale_y
+    
+    def _scale_value(self, value, axis='x'):
+        """Scale a value based on window size (axis: 'x' or 'y')"""
+        scale_x, scale_y = self._get_scale_factor()
+        return int(value * (scale_x if axis == 'x' else scale_y))
+    
     def _left_panel_rect(self):
-        return pygame.Rect(0, 60, 260, self.height - 100)
+        scale_x, scale_y = self._get_scale_factor()
+        return pygame.Rect(0, 60, int(260 * scale_x), int((self.height - 100) * scale_y))
 
     def _main_panel_rect(self):
-        return pygame.Rect(280, 80, 600, self.height - 140)
+        scale_x, scale_y = self._get_scale_factor()
+        return pygame.Rect(int(280 * scale_x), int(80 * scale_y), int(600 * scale_x), int((self.height - 140) * scale_y))
 
     def _left_content_bottom(self):
         layout = self._get_sidebar_layout()
@@ -493,11 +511,21 @@ class GUIManager:
         pygame.draw.polygon(self.screen, color, arrow)
 
     def _draw_product_box(self, bx, by, size):
-        """Draw a 3D box representing a product"""
+        """
+        Draw a 3D box representing a product.
+        Location: gui.py - línea ~495
+        Dibuja una caja 3D con efecto de profundidad usando polígonos.
+        Los colores RGB representan: cara frontal, cara superior, cara lateral.
+        """
         front_rect = pygame.Rect(bx, by, size, size)
-        # 3D effect - top and side faces
-        top_poly = [(bx, by), (bx + 8, by - 5), (bx + size + 8, by - 5), (bx + size, by)]
-        side_poly = [(bx + size, by), (bx + size + 8, by - 5), (bx + size + 8, by + size - 5), (bx + size, by + size)]
+        # 3D effect - top and side faces (with scaled offsets)
+        scale_factor = max(self._get_scale_factor())  # Use average scale
+        offset_x = int(8 * scale_factor)
+        offset_y = int(5 * scale_factor)
+        tape_width = max(1, int(2 * scale_factor))
+        
+        top_poly = [(bx, by), (bx + offset_x, by - offset_y), (bx + size + offset_x, by - offset_y), (bx + size, by)]
+        side_poly = [(bx + size, by), (bx + size + offset_x, by - offset_y), (bx + size + offset_x, by + size - offset_y), (bx + size, by + size)]
         
         # Draw the box
         pygame.draw.polygon(self.screen, (230, 197, 130), top_poly)
@@ -505,7 +533,7 @@ class GUIManager:
         pygame.draw.rect(self.screen, (219, 180, 112), front_rect)
         pygame.draw.rect(self.screen, Color.BORDER, front_rect, 1)
         # Tape line on box
-        pygame.draw.line(self.screen, (170, 130, 70), (bx + size//2, by), (bx + size//2, by + size), 2)
+        pygame.draw.line(self.screen, (170, 130, 70), (bx + size//2, by), (bx + size//2, by + size), tape_width)
 
     def _calculate_statistics(self):
         """Calculate real-time statistics"""
@@ -532,13 +560,33 @@ class GUIManager:
             total_time = sum(p.calcular_tiempo_total() or 0 for p in self.linea_produccion.productosCompletados)
             stats['tiempo_promedio'] = total_time / len(self.linea_produccion.productosCompletados)
         
-        # Find bottleneck (task with longest processing time)
+        # Find all bottlenecks (tasks with longest processing time)
         max_tiempo = 0
+        cuellos_botella = []
+        
+        # First pass: find maximum processing time
         for proceso_obj in self.proceso_objects.values():
             for tarea in proceso_obj.tareas:
                 if tarea.tiempo_proceso > max_tiempo:
                     max_tiempo = tarea.tiempo_proceso
-                    stats['cuello_botella'] = f"{tarea.nombre} ({max_tiempo} ciclos)"
+        
+        # Second pass: collect all tasks with max time (all bottlenecks)
+        if max_tiempo > 0:
+            for proceso_obj in self.proceso_objects.values():
+                for tarea in proceso_obj.tareas:
+                    if tarea.tiempo_proceso == max_tiempo:
+                        cuellos_botella.append(f"{tarea.nombre} ({max_tiempo} ciclos)")
+            
+            # Format the output based on number of bottlenecks
+            if len(cuellos_botella) == 1:
+                stats['cuello_botella'] = cuellos_botella[0]
+            elif len(cuellos_botella) <= 3:
+                stats['cuello_botella'] = f"{len(cuellos_botella)}: {', '.join(cuellos_botella)}"
+            else:
+                # Show first 3 and indicate there are more
+                stats['cuello_botella'] = f"{len(cuellos_botella)}: {', '.join(cuellos_botella[:3])}..."
+        else:
+            stats['cuello_botella'] = 'No detectado'
         
         # Count tasks by state
         for proceso_obj in self.proceso_objects.values():
@@ -608,9 +656,20 @@ class GUIManager:
         return tasks
 
     def draw_header(self):
-        pygame.draw.rect(self.screen, Color.HEADER_BG, (0, 0, self.width, 50))
+        scale_x, scale_y = self._get_scale_factor()
+        header_h = int(50 * scale_y)
+        pygame.draw.rect(self.screen, Color.HEADER_BG, (0, 0, self.width, header_h))
         title = self.font_title.render("Sistema de Simulación de Producción", True, Color.WHITE)
-        self.screen.blit(title, (15, 12))
+        self.screen.blit(title, (int(15 * scale_x), int(12 * scale_y)))
+
+        # Update button positions dynamically based on scale
+        btn_y = int(10 * scale_y)
+        self.btn_iniciar.rect = pygame.Rect(int(420 * scale_x), btn_y, int(85 * scale_x), int(35 * scale_y))
+        self.btn_pausar.rect = pygame.Rect(int(515 * scale_x), btn_y, int(85 * scale_x), int(35 * scale_y))
+        self.btn_reiniciar.rect = pygame.Rect(int(610 * scale_x), btn_y, int(85 * scale_x), int(35 * scale_y))
+        self.btn_reporte.rect = pygame.Rect(int(705 * scale_x), btn_y, int(85 * scale_x), int(35 * scale_y))
+        self.input_cantidad_producto.rect = pygame.Rect(int(965 * scale_x), btn_y, int(55 * scale_x), int(35 * scale_y))
+        self.btn_crear_producto.rect = pygame.Rect(int(1025 * scale_x), btn_y, int(165 * scale_x), int(35 * scale_y))
 
         self.btn_iniciar.draw(self.screen, self.font_small)
         self.btn_pausar.draw(self.screen, self.font_small)
@@ -920,13 +979,18 @@ class GUIManager:
         self.screen.blit(count_label, (452, by + 52))
 
     def draw_sidebar_right(self):
-        pygame.draw.rect(self.screen, Color.SIDEBAR_BG, (900, 60, 300, self.height - 80))
-        pygame.draw.line(self.screen, Color.BORDER, (900, 60), (900, self.height - 40), 2)
+        scale_x, scale_y = self._get_scale_factor()
+        sidebar_x = int(900 * scale_x)
+        sidebar_w = int(300 * scale_x)
+        sidebar_h = int((self.height - 80) * scale_y)
+        
+        pygame.draw.rect(self.screen, Color.SIDEBAR_BG, (sidebar_x, int(60 * scale_y), sidebar_w, sidebar_h))
+        pygame.draw.line(self.screen, Color.BORDER, (sidebar_x, int(60 * scale_y)), (sidebar_x, self.height - int(40 * scale_y)), 2)
 
         # Calculate real-time statistics
         stats_data = self._calculate_statistics()
 
-        y_pos = 80
+        y_pos = int(80 * scale_y)
         stats = [
             ("En Proceso Activo", str(stats_data['productos_activos']), Color.BLUE),
             ("Tiempo Promedio por Producto", f"{stats_data['tiempo_promedio']:.1f} ciclos", Color.BLACK),
@@ -935,13 +999,13 @@ class GUIManager:
 
         for i, (label, value, color) in enumerate(stats):
             label_text = self.font_small.render(label, True, Color.DARK_GRAY)
-            self.screen.blit(label_text, (920, y_pos + i * 100))
+            self.screen.blit(label_text, (sidebar_x + int(20 * scale_x), y_pos + int(i * 100 * scale_y)))
             value_text = self.font_normal.render(value, True, color)
-            self.screen.blit(value_text, (920, y_pos + 25 + i * 100))
+            self.screen.blit(value_text, (sidebar_x + int(20 * scale_x), y_pos + int(25 * scale_y) + int(i * 100 * scale_y)))
 
-        y_tareas = 410
+        y_tareas = int(410 * scale_y)
         titulo_tareas = self.font_small.render("Tareas por Estado", True, Color.BLACK)
-        self.screen.blit(titulo_tareas, (920, y_tareas))
+        self.screen.blit(titulo_tareas, (sidebar_x + int(20 * scale_x), y_tareas))
 
         estados = [
             ("Libres", str(stats_data['tareas_libres']), Color.GREEN), 
@@ -949,37 +1013,44 @@ class GUIManager:
             ("Saturadas", str(stats_data['tareas_saturadas']), Color.RED)
         ]
         for i, (label, value, color) in enumerate(estados):
-            pygame.draw.rect(self.screen, color, (920, y_tareas + 30 + i * 24, 65, 20))
+            box_width = int(120 * scale_x)
+            pygame.draw.rect(self.screen, color, (sidebar_x + int(20 * scale_x), y_tareas + int(30 * scale_y) + int(i * 24 * scale_y), box_width, int(20 * scale_y)))
             label_text = self.font_small.render(label, True, Color.WHITE)
-            self.screen.blit(label_text, (925, y_tareas + 32 + i * 24))
+            self.screen.blit(label_text, (sidebar_x + int(25 * scale_x), y_tareas + int(32 * scale_y) + int(i * 24 * scale_y)))
             value_text = self.font_small.render(value, True, Color.BLACK)
-            self.screen.blit(value_text, (995, y_tareas + 32 + i * 24))
+            self.screen.blit(value_text, (sidebar_x + int(20 * scale_x) + box_width - int(20 * scale_x), y_tareas + int(32 * scale_y) + int(i * 24 * scale_y)))
 
-        y_velocidad = 570
+        y_velocidad = int(570 * scale_y)
         velocidad_text = self.font_small.render("Velocidad de Simulación", True, Color.BLACK)
-        self.screen.blit(velocidad_text, (920, y_velocidad))
+        self.screen.blit(velocidad_text, (sidebar_x + int(20 * scale_x), y_velocidad))
 
-        pygame.draw.line(self.screen, Color.BORDER, (920, y_velocidad + 30), (1070, y_velocidad + 30), 2)
+        vel_line_start_x = sidebar_x + int(20 * scale_x)
+        vel_line_end_x = sidebar_x + int(170 * scale_x)
+        pygame.draw.line(self.screen, Color.BORDER, (vel_line_start_x, y_velocidad + int(30 * scale_y)), (vel_line_end_x, y_velocidad + int(30 * scale_y)), 2)
         
         # Draw speed indicator at correct position
-        speed_x = 920 + (self.velocidad - 1) * 37.5
-        pygame.draw.circle(self.screen, Color.BLUE, (int(speed_x), y_velocidad + 30), 8)
+        speed_x = vel_line_start_x + int((self.velocidad - 1) * 37.5 * scale_x)
+        pygame.draw.circle(self.screen, Color.BLUE, (int(speed_x), y_velocidad + int(30 * scale_y)), int(8 * max(scale_x, scale_y)))
 
         vel_labels = ["x1", "x2", "x3", "x4", "x5"]
         for i, label in enumerate(vel_labels):
             vel_text = self.font_small.render(label, True, Color.DARK_GRAY)
-            self.screen.blit(vel_text, (920 + i * 37.5, y_velocidad + 45))
+            self.screen.blit(vel_text, (vel_line_start_x + int(i * 37.5 * scale_x), y_velocidad + int(45 * scale_y)))
 
     def draw_statusbar(self):
-        pygame.draw.rect(self.screen, Color.DARK_GRAY, (0, self.height - 40, self.width, 40))
+        scale_x, scale_y = self._get_scale_factor()
+        statusbar_h = int(40 * scale_y)
+        statusbar_y = self.height - statusbar_h
+        
+        pygame.draw.rect(self.screen, Color.DARK_GRAY, (0, statusbar_y, self.width, statusbar_h))
 
         estado_text = self.font_small.render(f"Estado: {self.state.name}", True, Color.WHITE)
         tiempo_text = self.font_small.render(f"Tiempo global: {self.tiempo_global} ciclos", True, Color.WHITE)
         velocidad_text = self.font_small.render(f"Velocidad: x{self.velocidad}", True, Color.WHITE)
 
-        self.screen.blit(estado_text, (15, self.height - 32))
-        self.screen.blit(tiempo_text, (320, self.height - 32))
-        self.screen.blit(velocidad_text, (self.width - 130, self.height - 32))
+        self.screen.blit(estado_text, (int(15 * scale_x), statusbar_y + int(8 * scale_y)))
+        self.screen.blit(tiempo_text, (int(320 * scale_x), statusbar_y + int(8 * scale_y)))
+        self.screen.blit(velocidad_text, (self.width - int(130 * scale_x), statusbar_y + int(8 * scale_y)))
 
     def show_notification(self, message, notification_type="error"):
         """Add a notification to display
@@ -1070,6 +1141,12 @@ class GUIManager:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+            
+            # Handle window resize
+            if event.type == pygame.VIDEORESIZE:
+                self.width, self.height = event.size
+                self.screen = pygame.display.set_mode((self.width, self.height), pygame.RESIZABLE)
+                continue
 
             if event.type == pygame.MOUSEWHEEL:
                 mouse_pos = pygame.mouse.get_pos()
